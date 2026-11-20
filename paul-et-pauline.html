@@ -557,6 +557,11 @@
     font-family: "Poppins", sans-serif; font-weight: 700; font-size: 13px; letter-spacing: 0.02em;
     margin: 18px 0 2px; padding-bottom: 6px; border-bottom: 1px dashed var(--border); color: var(--ink-faint);
   }
+  .orders-past-separator {
+    font-family: "Poppins", sans-serif; font-weight: 700; font-size: 13.5px; letter-spacing: 0.02em;
+    margin: 26px 0 6px; padding: 8px 0 8px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+    color: var(--ink-faint); text-align: center;
+  }
   .order-card { background: var(--surface); border: 1px solid var(--border-soft); border-radius: var(--radius-m); padding: 16px 18px; box-shadow: var(--shadow-s); }
   .order-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
   .order-num { font-family: "Poppins", sans-serif; font-size: 18px; font-weight: 600; }
@@ -571,6 +576,8 @@
   .paid-badge.is-unpaid { background: var(--danger-soft); color: var(--danger); }
   .slot-overloaded { color: var(--warning); font-weight: 700; }
   .slot-badge { font-size: 11.5px; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: var(--warning-soft); color: var(--warning); white-space: nowrap; }
+  .late-badge { font-size: 11.5px; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: var(--danger-soft); color: var(--danger); white-space: nowrap; }
+  .historique-hint { font-size: 13px; color: var(--ink-soft); margin: 0 0 12px; }
   .slot-warning-note { color: var(--warning); font-weight: 600; font-size: 12.5px; margin-top: 6px; }
   .closed-date-note { color: var(--danger); }
   .closed-date-note.closed-date-note-open { color: var(--success); }
@@ -896,6 +903,7 @@
         <button class="nav-interface-menu-item" type="button" data-tab="preparation">🧾 Suivi de préparation</button>
         <button class="nav-interface-menu-item" type="button" data-tab="buches">🪵 Répartition des bûches</button>
         <button class="nav-interface-menu-item" type="button" data-tab="recurrentes">🔁 Commandes récurrentes</button>
+        <button class="nav-interface-menu-item" type="button" data-tab="historique">🗄 Historique des commandes</button>
         <button class="nav-interface-menu-item" type="button" data-tab="fermeture">🚫 Jours de fermeture</button>
       </div>
     </div>
@@ -1003,6 +1011,15 @@
       <button class="btn btn-secondary" id="export-clients-btn">📇 Exporter les clients</button>
     </div>
     <div class="orders-list" id="orders-list"></div>
+  </section>
+
+  <!-- ===================== HISTORIQUE ===================== -->
+  <section class="view" id="view-historique">
+    <p class="historique-hint">Commandes récupérées des jours passés. Une commande d'un jour passé mais pas encore récupérée reste dans l'onglet Commandes, marquée « En retard ».</p>
+    <div class="catalogue-toolbar orders-toolbar">
+      <input class="form-input orders-search" id="historique-search" type="search" placeholder="🔎 Rechercher par nom, téléphone ou n° de commande" />
+    </div>
+    <div class="orders-list" id="historique-list"></div>
   </section>
 
   <!-- ===================== CATALOGUE ===================== -->
@@ -1229,6 +1246,7 @@
     editingRecurringId: null,
     editingRecurringMeta: null,
     ordersSearch: "",
+    historiqueSearch: "",
     ordersGroupByDay: false,
     productSearch: "",
     catalogSearch: "",
@@ -1694,7 +1712,7 @@
     // menu), so it needs its own selected/highlight rule covering both
     // pages reachable from that menu.
     var interfaceBtn = document.getElementById("nav-interface");
-    if (interfaceBtn) interfaceBtn.setAttribute("aria-selected", (tab === "catalogue" || tab === "preparation" || tab === "buches" || tab === "recurrentes" || tab === "fermeture") ? "true" : "false");
+    if (interfaceBtn) interfaceBtn.setAttribute("aria-selected", (tab === "catalogue" || tab === "preparation" || tab === "buches" || tab === "recurrentes" || tab === "historique" || tab === "fermeture") ? "true" : "false");
     document.querySelectorAll(".nav-interface-menu-item").forEach(function (item) {
       item.setAttribute("aria-current", item.getAttribute("data-tab") === tab ? "true" : "false");
     });
@@ -2800,16 +2818,33 @@
     return false;
   }
 
+  // Once its pickup day is behind us AND it's been collected, an order is
+  // done business -- it moves out of Commandes entirely and into
+  // Historique, instead of piling up at the bottom forever. An order whose
+  // day has passed but that's NOT marked récupérée stays in Commandes (see
+  // isLateOrder below): a forgotten pickup must stay visible where staff
+  // are actually looking, not quietly slide into an archive no one checks
+  // day to day.
+  function isArchivedToHistory(order) {
+    return order.status === "recuperee" && pickupDateKey(order) < todayDateKey();
+  }
+
+  function isLateOrder(order) {
+    return order.status !== "recuperee" && pickupDateKey(order) < todayDateKey();
+  }
+
   function renderOrders() {
     updateSlotWarning();
     renderPreparation();
     renderBuches();
+    renderHistorique();
     var wrap = document.getElementById("orders-list");
-    if (!state.orders.length) {
+    var commandesOrders = state.orders.filter(function (order) { return !isArchivedToHistory(order); });
+    if (!commandesOrders.length) {
       wrap.innerHTML = "<div class=\"empty-state\"><strong>Aucune commande</strong>Les commandes enregistrées apparaîtront ici.</div>";
       return;
     }
-    var visibleOrders = state.orders.filter(function (order) { return orderMatchesSearch(order, state.ordersSearch); });
+    var visibleOrders = commandesOrders.filter(function (order) { return orderMatchesSearch(order, state.ordersSearch); });
     if (!visibleOrders.length) {
       wrap.innerHTML = "<div class=\"empty-state\"><strong>Aucun résultat</strong>Aucune commande ne correspond à « " + escapeHtml(state.ordersSearch) + " ».</div>";
       return;
@@ -2824,7 +2859,17 @@
         byDate[key].push(order);
       });
       dateKeys.sort(); // "YYYY-MM-DD" keys sort chronologically as plain strings
-      dateKeys.forEach(function (key) {
+      // Nothing ever removes an order from the list once its pickup date has
+      // passed -- without this split, a day left un-cleared (or a batch of
+      // recurring orders generated long ago) would pile up above today's
+      // group forever, pushing "today" further down the list as time goes
+      // on. Today and every future day stay pinned at the top, in
+      // chronological order; anything in the past is still here (nothing is
+      // deleted), just demoted below its own separator.
+      var today = todayDateKey();
+      var upcomingKeys = dateKeys.filter(function (k) { return k >= today; });
+      var pastKeys = dateKeys.filter(function (k) { return k < today; });
+      function renderDateGroup(key) {
         var dayOrders = byDate[key].slice().sort(function (a, b) {
           return (slotToMinutes(a.pickupSlot) - slotToMinutes(b.pickupSlot)) || ((a.orderNumber || 0) - (b.orderNumber || 0));
         });
@@ -2834,7 +2879,20 @@
           "<span class=\"orders-date-header-count\">· " + dayOrders.length + (dayOrders.length > 1 ? " commandes" : " commande") + "</span>";
         wrap.appendChild(header);
         appendOrderCards(wrap, dayOrders);
-      });
+      }
+      upcomingKeys.forEach(renderDateGroup);
+      if (pastKeys.length) {
+        // Only ever non-récupérée orders here -- their récupérée siblings
+        // from the same past day were already filtered out into Historique
+        // above (see isArchivedToHistory), so what's left genuinely needs
+        // attention.
+        var pastCount = pastKeys.reduce(function (sum, k) { return sum + byDate[k].length; }, 0);
+        var pastSep = document.createElement("div");
+        pastSep.className = "orders-past-separator";
+        pastSep.textContent = "⚠ En retard (" + pastCount + (pastCount > 1 ? " commandes" : " commande") + ")";
+        wrap.appendChild(pastSep);
+        pastKeys.forEach(renderDateGroup);
+      }
     } else {
       appendOrderCards(wrap, visibleOrders);
     }
@@ -2884,6 +2942,7 @@
       "<div class=\"order-head\"><span class=\"order-num\">Commande n°" + order.orderNumber + (order.recurringId ? " <span class=\"recurring-order-badge\" title=\"Générée automatiquement par une commande récurrente\">🔁</span>" : "") + "</span>" +
       "<span class=\"order-meta\">" + metaParts.join(" · ") + "</span>" +
       "<div class=\"order-badges\">" +
+      (isLateOrder(order) ? "<span class=\"late-badge\">⚠ En retard</span>" : "") +
       (slotOverloaded ? "<span class=\"slot-badge\">⚠ " + slotCount + " commandes sur ce créneau</span>" : "") +
       "<span class=\"paid-badge " + (order.paid ? "is-paid" : "is-unpaid") + "\">" + (order.paid ? "Réglée" : "Non réglée") + "</span>" +
       "<span class=\"status-badge status-" + statusInfo.id + "\">" + statusInfo.label + "</span>" +
@@ -2950,6 +3009,37 @@
       renderOrders();
     }
   }
+
+  // The archive is just a different lens on the same state.orders -- an
+  // order lands here the moment it satisfies isArchivedToHistory (récupérée
+  // + past pickup day), and leaves again automatically the moment that's no
+  // longer true (e.g. someone flips its status back), since this re-renders
+  // from the same source data every time renderOrders() does. Most recent
+  // pickup first: that's what "looking something up in the past" means.
+  function renderHistorique() {
+    var wrap = document.getElementById("historique-list");
+    if (!wrap) return;
+    var archived = state.orders.filter(isArchivedToHistory);
+    if (!archived.length) {
+      wrap.innerHTML = "<div class=\"empty-state\"><strong>Historique vide</strong>Les commandes récupérées des jours passés apparaîtront ici.</div>";
+      return;
+    }
+    var visible = archived.filter(function (order) { return orderMatchesSearch(order, state.historiqueSearch); });
+    if (!visible.length) {
+      wrap.innerHTML = "<div class=\"empty-state\"><strong>Aucun résultat</strong>Aucune commande ne correspond à « " + escapeHtml(state.historiqueSearch) + " ».</div>";
+      return;
+    }
+    visible = visible.slice().sort(function (a, b) {
+      return (pickupDateKey(b) || "").localeCompare(pickupDateKey(a) || "") || ((b.orderNumber || 0) - (a.orderNumber || 0));
+    });
+    wrap.innerHTML = "";
+    visible.forEach(function (order) { wrap.appendChild(buildOrderCard(order)); });
+  }
+
+  document.getElementById("historique-search").addEventListener("input", function (e) {
+    state.historiqueSearch = e.target.value;
+    renderHistorique();
+  });
 
   /* ============================================================
      PRÉPARATION TAB
